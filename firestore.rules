@@ -63,7 +63,7 @@ service cloud.firestore {
               data.date is string && data.date.size() <= 32 &&
               data.status in ['PREVU', 'EN_COURS', 'PRET', 'TERMINE', 'ANNULE'] &&
               data.addedBy is string && data.addedBy.size() <= 128 &&
-              data.createdAt is number && data.updatedAt is number &&
+              data.createdAt is timestamp && data.updatedAt is timestamp &&
               checkOptionalString(data, 'clientPhone') &&
               checkOptionalString(data, 'licensePlate') &&
               checkOptionalString(data, 'startTime') &&

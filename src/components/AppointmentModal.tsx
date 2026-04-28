@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, Loader2, Calendar as CalendarIcon, Clock, Car, User, Phone, AlignLeft } from 'lucide-react';
-import { doc, setDoc, updateDoc } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { db } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/errorUtils';
@@ -56,12 +56,11 @@ export default function AppointmentModal({ isOpen, initialDate, appointment, onC
     setLoading(true);
 
     try {
-      const now = Date.now();
       if (isEditing) {
         const ref = doc(db, 'appointments', appointment.id);
         const dataToUpdate = {
           ...formData, // Spread form fields
-          updatedAt: now,
+          updatedAt: serverTimestamp(),
           updatedBy: user.uid,
         };
         await updateDoc(ref, dataToUpdate);
@@ -71,8 +70,8 @@ export default function AppointmentModal({ isOpen, initialDate, appointment, onC
         const newAppt = {
           ...formData,
           addedBy: user.uid,
-          createdAt: now,
-          updatedAt: now,
+          createdAt: serverTimestamp(),
+          updatedAt: serverTimestamp(),
         };
         await setDoc(ref, newAppt);
       }
