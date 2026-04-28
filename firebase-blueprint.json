@@ -1,0 +1,46 @@
+{
+  "entities": {
+    "Employee": {
+      "title": "Employee",
+      "description": "An employee of VEVA AUTOMOBILE",
+      "type": "object",
+      "properties": {
+        "email": { "type": "string" },
+        "name": { "type": "string" },
+        "role": { "type": "string", "enum": ["ADMIN", "EMPLOYEE"] },
+        "createdAt": { "type": "number" }
+      },
+      "required": ["email", "name", "role", "createdAt"]
+    },
+    "Appointment": {
+      "title": "Appointment",
+      "description": "A car wash appointment",
+      "type": "object",
+      "properties": {
+        "clientName": { "type": "string" },
+        "clientPhone": { "type": "string" },
+        "vehicleModel": { "type": "string" },
+        "licensePlate": { "type": "string" },
+        "date": { "type": "string", "description": "YYYY-MM-DD" },
+        "startTime": { "type": "string" },
+        "status": { "type": "string", "enum": ["PREVU", "EN_COURS", "PRET", "TERMINE", "ANNULE"] },
+        "notes": { "type": "string" },
+        "addedBy": { "type": "string" },
+        "updatedBy": { "type": "string" },
+        "createdAt": { "type": "number" },
+        "updatedAt": { "type": "number" }
+      },
+      "required": ["clientName", "vehicleModel", "date", "status", "addedBy", "createdAt", "updatedAt"]
+    }
+  },
+  "firestore": {
+    "employees": {
+      "schema": { "$ref": "#/entities/Employee" },
+      "description": "List of authorized employees"
+    },
+    "appointments": {
+      "schema": { "$ref": "#/entities/Appointment" },
+      "description": "All washing appointments"
+    }
+  }
+}

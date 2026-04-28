@@ -1,0 +1,101 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isSignedIn() { return request.auth != null; }
+    function isVerified() { return request.auth.token.email_verified == true; }
+    function incoming() { return request.resource.data; }
+    function existing() { return resource.data; }
+    
+    function isAdmin() {
+      // leartshabija@gmail.com is the bootstrapped admin
+      return isSignedIn() && isVerified() && (
+        request.auth.token.email == 'leartshabija@gmail.com' ||
+        (exists(/databases/$(database)/documents/employees/$(request.auth.uid)) &&
+         get(/databases/$(database)/documents/employees/$(request.auth.uid)).data.role == 'ADMIN')
+      );
+    }
+
+    function isEmployee() {
+      return isSignedIn() && isVerified() && (
+        request.auth.token.email == 'leartshabija@gmail.com' ||
+        exists(/databases/$(database)/documents/employees/$(request.auth.uid))
+      );
+    }
+
+    function isValidId(id) { 
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$'); 
+    }
+
+    function isValidEmployee(data) {
+      return data.keys().hasAll(['email', 'name', 'role', 'createdAt']) &&
+             data.keys().size() <= 4 &&
+             data.email is string && data.email.size() <= 128 &&
+             data.name is string && data.name.size() <= 128 &&
+             data.role in ['ADMIN', 'EMPLOYEE'] &&
+             data.createdAt is number;
+    }
+
+    match /employees/{userId} {
+      allow read: if isEmployee();
+      allow create: if isAdmin() && isValidId(userId) && isValidEmployee(incoming()) && incoming().createdAt == request.time;
+      allow update: if isAdmin() && isValidId(userId) && isValidEmployee(incoming()) &&
+                    incoming().createdAt == existing().createdAt &&
+                    incoming().diff(existing()).affectedKeys().hasOnly(['name', 'role', 'email']);
+      allow delete: if isAdmin() && isValidId(userId);
+    }
+
+    function isValidAppointmentSize(data) {
+       return data.keys().hasAll(['clientName', 'vehicleModel', 'date', 'status', 'addedBy', 'createdAt', 'updatedAt']) &&
+              data.keys().size() <= 12;
+    }
+
+    function checkOptionalString(data, key) {
+       return !data.keys().hasAny([key]) || (data[key] is string && data[key].size() <= 1024);
+    }
+
+    function isValidAppointmentTypes(data) {
+       return data.clientName is string && data.clientName.size() <= 128 &&
+              data.vehicleModel is string && data.vehicleModel.size() <= 128 &&
+              data.date is string && data.date.size() <= 32 &&
+              data.status in ['PREVU', 'EN_COURS', 'PRET', 'TERMINE', 'ANNULE'] &&
+              data.addedBy is string && data.addedBy.size() <= 128 &&
+              data.createdAt is number && data.updatedAt is number &&
+              checkOptionalString(data, 'clientPhone') &&
+              checkOptionalString(data, 'licensePlate') &&
+              checkOptionalString(data, 'startTime') &&
+              checkOptionalString(data, 'notes') &&
+              checkOptionalString(data, 'updatedBy');
+    }
+
+    function isValidAppointment(data) {
+       return isValidAppointmentSize(data) && isValidAppointmentTypes(data);
+    }
+
+    match /appointments/{appointmentId} {
+      allow read: if isEmployee();
+      
+      allow create: if isEmployee() && isValidId(appointmentId) &&
+                    isValidAppointment(incoming()) &&
+                    incoming().addedBy == request.auth.uid &&
+                    incoming().createdAt == request.time &&
+                    incoming().updatedAt == request.time;
+      
+      allow update: if isEmployee() && isValidId(appointmentId) &&
+                    isValidAppointment(incoming()) &&
+                    incoming().createdAt == existing().createdAt &&
+                    incoming().addedBy == existing().addedBy &&
+                    incoming().updatedAt == request.time &&
+                    incoming().updatedBy == request.auth.uid &&
+                    (
+                      isAdmin() || 
+                      incoming().diff(existing()).affectedKeys().hasOnly(['status', 'notes', 'updatedAt', 'updatedBy', 'clientName', 'clientPhone', 'vehicleModel', 'licensePlate', 'date', 'startTime'])
+                    );
+
+      allow delete: if isAdmin() && isValidId(appointmentId);
+    }
+  }
+}
