@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import { X, Loader2, Calendar as CalendarIcon, Clock, Car, User, Phone, AlignLeft } from 'lucide-react';
-import { doc, setDoc, updateDoc, serverTimestamp } from 'firebase/firestore';
+import { doc, setDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
 import { format } from 'date-fns';
 import { db } from '../lib/firebase';
 import { handleFirestoreError, OperationType } from '../lib/errorUtils';
@@ -78,6 +78,21 @@ export default function AppointmentModal({ isOpen, initialDate, appointment, onC
       onClose();
     } catch (error) {
       handleFirestoreError(error, isEditing ? OperationType.UPDATE : OperationType.CREATE, 'appointments');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!appointment || !user) return;
+    if (!window.confirm('Voulez-vous vraiment supprimer ce véhicule ?')) return;
+    
+    setLoading(true);
+    try {
+      await deleteDoc(doc(db, 'appointments', appointment.id));
+      onClose();
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, 'appointments');
     } finally {
       setLoading(false);
     }
@@ -231,24 +246,36 @@ export default function AppointmentModal({ isOpen, initialDate, appointment, onC
         </div>
 
         {/* Footer */}
-        <div className="border-t border-gray-100 bg-gray-50 px-6 py-4 sm:flex sm:flex-row-reverse rounded-b-2xl">
-          <button
-            type="submit"
-            form="appointment-form"
-            disabled={loading}
-            className="flex w-full items-center justify-center rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50 sm:w-auto shadow-sm"
-          >
-            {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {isEditing ? 'Enregistrer' : 'Confirmer le lavage'}
-          </button>
-          <button
-            type="button"
-            onClick={onClose}
-            disabled={loading}
-            className="mt-3 w-full rounded-lg bg-white px-5 py-2.5 text-sm font-medium text-slate-700 border border-slate-300 hover:bg-slate-50 transition-colors sm:mt-0 sm:mr-3 sm:w-auto shadow-sm tracking-wide"
-          >
-            Annuler
-          </button>
+        <div className="border-t border-gray-100 bg-gray-50 px-6 py-4 sm:flex sm:flex-row-reverse sm:justify-between rounded-b-2xl">
+          <div className="flex flex-col sm:flex-row-reverse gap-3 w-full sm:w-auto">
+            <button
+              type="submit"
+              form="appointment-form"
+              disabled={loading}
+              className="flex w-full items-center justify-center rounded-lg bg-blue-600 px-5 py-2.5 text-sm font-medium text-white transition-colors hover:bg-blue-700 disabled:opacity-50 sm:w-auto shadow-sm"
+            >
+              {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {isEditing ? 'Enregistrer' : 'Confirmer le lavage'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              disabled={loading}
+              className="w-full rounded-lg bg-white px-5 py-2.5 text-sm font-medium text-slate-700 border border-slate-300 hover:bg-slate-50 transition-colors sm:w-auto shadow-sm tracking-wide"
+            >
+              Annuler
+            </button>
+          </div>
+          {isEditing && (
+            <button
+              type="button"
+              onClick={handleDelete}
+              disabled={loading}
+              className="mt-3 w-full rounded-lg bg-red-50 text-red-600 px-5 py-2.5 text-sm font-medium border border-red-200 hover:bg-red-100 transition-colors sm:mt-0 sm:w-auto shadow-sm tracking-wide"
+            >
+              Supprimer
+            </button>
+          )}
         </div>
 
       </div>
