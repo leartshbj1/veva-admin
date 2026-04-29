@@ -1,9 +1,8 @@
 import { useState, useEffect } from 'react';
 import { X, Loader2, Calendar as CalendarIcon, Clock, Car, User, Phone, AlignLeft } from 'lucide-react';
-import { doc, setDoc, updateDoc, deleteDoc, serverTimestamp } from 'firebase/firestore';
+import { ref as dbRef, set, update, remove, push } from 'firebase/database';
 import { format } from 'date-fns';
-import { db } from '../lib/firebase';
-import { handleFirestoreError, OperationType } from '../lib/errorUtils';
+import { rtdb } from '../lib/firebase';
 import { useAuth } from '../contexts/AuthContext';
 import { Appointment, AppointmentStatus, STATUS_LABELS } from '../types';
 
@@ -11,12 +10,14 @@ interface AppointmentModalProps {
   isOpen: boolean;
   initialDate: Date;
   appointment?: Appointment;
+  defaultToPlan?: boolean;
   onClose: () => void;
 }
 
-export default function AppointmentModal({ isOpen, initialDate, appointment, onClose }: AppointmentModalProps) {
+export default function AppointmentModal({ isOpen, initialDate, appointment, defaultToPlan = false, onClose }: AppointmentModalProps) {
   const { user } = useAuth();
   const [loading, setLoading] = useState(false);
+  const [isToPlan, setIsToPlan] = useState(false);
   
   const isEditing = !!appointment;
 
@@ -33,20 +34,30 @@ export default function AppointmentModal({ isOpen, initialDate, appointment, onC
 
   useEffect(() => {
     if (appointment) {
+      // Trying to parse notes out of RTDB custom format
+      let parsedNotes = appointment.notes || '';
+      if (parsedNotes.startsWith('Formule : ')) {
+        const parts = parsedNotes.split('\n');
+        parts.shift(); // remove "Formule : ...."
+        parsedNotes = parts.join('\n');
+      }
+
       setFormData({
-        clientName: appointment.clientName,
+        clientName: appointment.clientName || '',
         clientPhone: appointment.clientPhone || '',
-        vehicleModel: appointment.vehicleModel,
+        vehicleModel: appointment.vehicleModel || '',
         licensePlate: appointment.licensePlate || '',
-        date: appointment.date,
+        date: appointment.date || '',
         startTime: appointment.startTime || '',
-        status: appointment.status,
-        notes: appointment.notes || '',
+        status: appointment.status || 'PREVU',
+        notes: parsedNotes,
       });
+      setIsToPlan(!appointment.date);
     } else {
       setFormData(prev => ({ ...prev, date: format(initialDate, 'yyyy-MM-dd') }));
+      setIsToPlan(defaultToPlan);
     }
-  }, [appointment, initialDate]);
+  }, [appointment, initialDate, defaultToPlan]);
 
   if (!isOpen) return null;
 
@@ -56,28 +67,54 @@ export default function AppointmentModal({ isOpen, initialDate, appointment, onC
     setLoading(true);
 
     try {
-      if (isEditing) {
-        const ref = doc(db, 'appointments', appointment.id);
+      const now = Date.now();
+      const finalDate = isToPlan ? '' : formData.date;
+      const finalTime = isToPlan ? '' : formData.startTime;
+
+      if (isEditing && appointment) {
+        const rtdbRef = dbRef(rtdb, `appointments/${appointment.id}`);
+        // We update specific fields to preserve others like `service` if present from client site
         const dataToUpdate = {
-          ...formData, // Spread form fields
-          updatedAt: serverTimestamp(),
+          customerName: formData.clientName, // client side expects customerName
+          clientName: formData.clientName,
+          customerPhone: formData.clientPhone,
+          clientPhone: formData.clientPhone,
+          vehicleModel: formData.vehicleModel,
+          licensePlate: formData.licensePlate,
+          date: finalDate,
+          time: finalTime,
+          startTime: finalTime,
+          status: formData.status,
+          notes: formData.notes,
+          updatedAt: now,
           updatedBy: user.uid,
         };
-        await updateDoc(ref, dataToUpdate);
+        await update(rtdbRef, dataToUpdate);
       } else {
-        const id = crypto.randomUUID(); // Good enough for IDs
-        const ref = doc(db, 'appointments', id);
+        const appointmentsRef = dbRef(rtdb, 'appointments');
+        const newRef = push(appointmentsRef);
         const newAppt = {
-          ...formData,
+          customerName: formData.clientName,
+          clientName: formData.clientName,
+          customerPhone: formData.clientPhone,
+          clientPhone: formData.clientPhone,
+          vehicleModel: formData.vehicleModel,
+          licensePlate: formData.licensePlate,
+          date: finalDate,
+          time: finalTime,
+          startTime: finalTime,
+          status: formData.status,
+          notes: formData.notes,
           addedBy: user.uid,
-          createdAt: serverTimestamp(),
-          updatedAt: serverTimestamp(),
+          createdAt: now,
+          updatedAt: now,
         };
-        await setDoc(ref, newAppt);
+        await set(newRef, newAppt);
       }
       onClose();
     } catch (error) {
-      handleFirestoreError(error, isEditing ? OperationType.UPDATE : OperationType.CREATE, 'appointments');
+      console.error('Error saving appointment:', error);
+      alert('Erreur lors de l\'enregistrement : ' + (error instanceof Error ? error.message : String(error)));
     } finally {
       setLoading(false);
     }
@@ -89,10 +126,12 @@ export default function AppointmentModal({ isOpen, initialDate, appointment, onC
     
     setLoading(true);
     try {
-      await deleteDoc(doc(db, 'appointments', appointment.id));
+      const rtdbRef = dbRef(rtdb, `appointments/${appointment.id}`);
+      await remove(rtdbRef);
       onClose();
     } catch (error) {
-      handleFirestoreError(error, OperationType.DELETE, 'appointments');
+      console.error('Error deleting appointment:', error);
+      alert('Erreur lors de la suppression : ' + (error instanceof Error ? error.message : String(error)));
     } finally {
       setLoading(false);
     }
@@ -116,37 +155,49 @@ export default function AppointmentModal({ isOpen, initialDate, appointment, onC
         <div className="flex-1 overflow-y-auto px-6 py-4">
           <form id="appointment-form" onSubmit={handleSubmit} className="space-y-5">
             
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">Date</label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                    <CalendarIcon className="h-4 w-4 text-gray-400" />
+            <label className="flex items-center gap-2 cursor-pointer p-3 bg-slate-50 border border-slate-200 rounded-lg w-fit">
+              <input 
+                type="checkbox" 
+                checked={isToPlan}
+                onChange={(e) => setIsToPlan(e.target.checked)}
+                className="w-4 h-4 text-blue-600 rounded border-gray-300 focus:ring-blue-600"
+              />
+              <span className="text-sm font-bold text-slate-700">Véhicule à prévoir (sans date ni heure)</span>
+            </label>
+
+            {!isToPlan && (
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">Date</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                      <CalendarIcon className="h-4 w-4 text-gray-400" />
+                    </div>
+                    <input
+                      type="date"
+                      required
+                      value={formData.date}
+                      onChange={e => setFormData({ ...formData, date: e.target.value })}
+                      className="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2.5 pl-10 text-sm focus:border-blue-600 focus:ring-blue-600 focus:outline-none"
+                    />
                   </div>
-                  <input
-                    type="date"
-                    required
-                    value={formData.date}
-                    onChange={e => setFormData({ ...formData, date: e.target.value })}
-                    className="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2.5 pl-10 text-sm focus:border-blue-600 focus:ring-blue-600 focus:outline-none"
-                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">Heure (Optionnel)</label>
+                  <div className="relative">
+                    <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
+                      <Clock className="h-4 w-4 text-gray-400" />
+                    </div>
+                    <input
+                      type="time"
+                      value={formData.startTime}
+                      onChange={e => setFormData({ ...formData, startTime: e.target.value })}
+                      className="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2.5 pl-10 text-sm focus:border-blue-600 focus:ring-blue-600 focus:outline-none"
+                    />
+                  </div>
                 </div>
               </div>
-              <div className="space-y-1.5">
-                <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">Heure (Optionnel)</label>
-                <div className="relative">
-                  <div className="absolute inset-y-0 left-0 flex items-center pl-3 pointer-events-none">
-                    <Clock className="h-4 w-4 text-gray-400" />
-                  </div>
-                  <input
-                    type="time"
-                    value={formData.startTime}
-                    onChange={e => setFormData({ ...formData, startTime: e.target.value })}
-                    className="block w-full rounded-lg border border-slate-300 bg-slate-50 p-2.5 pl-10 text-sm focus:border-blue-600 focus:ring-blue-600 focus:outline-none"
-                  />
-                </div>
-              </div>
-            </div>
+            )}
 
             <div className="space-y-1.5">
               <label className="text-xs font-semibold text-gray-600 uppercase tracking-wider">Statut</label>
